@@ -1,0 +1,309 @@
+---
+title: "WGCNA for bulk RNASeq data"
+author:  |
+ | Katia Lopes
+ | Systems Analyst and Computational Biologist
+output: 
+ rmarkdown::html_document:
+   code_folding: hide
+   toc: true
+   toc_float: true
+date: "`r Sys.Date()`"
+---
+
+Peter Langfelder and Steve Horvath tutorials [are here](https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/Tutorials/)
+
+Paper: [Navarro et al, 2021](https://www.nature.com/articles/s43587-021-00110-x)
+
+```{r clean.variables, echo=FALSE}
+#This command clean all variables. BE CAREFULL!!! 
+rm(list = setdiff(ls(), lsf.str()))
+```
+
+```{r Helper Functions, echo = FALSE}
+createDT <- function(DF, caption="", scrollY=500){
+  data <- DT::datatable(DF, caption=caption,
+    extensions =  'Buttons',
+    options = list( dom = 'Bfrtip', 
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
+                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
+                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
+    )
+  ) 
+   return(data)
+}
+```
+
+```{r load.packages, echo=FALSE, message=FALSE, results='hide'}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+
+# if(!require("limma")) BiocManager::install("limma"); library("limma")
+library(edgeR)
+library(sva)
+library(limma)
+library(factoextra)
+library(WGCNA)
+library(data.table)
+library(flashClust)
+library(DESeq2)
+library(tidyverse)
+```
+
+# Download dataset 
+```{r input}
+# https://zenodo.org/record/4715907
+expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+
+# Metadata 
+metadata = as.data.frame(data.table::fread(paste0(expr_dir, "MyND/MyND_metadata.txt"), header = T, stringsAsFactors = F, check.names = F))
+
+# Counts expression data 
+data = data.table::fread(paste0(expr_dir, "MyND/monocyte_counts_matrix.txt"), header = T, stringsAsFactors = F, check.names = F)
+# dim(data)
+# data[1:5, 1:5]
+data_tmp = as.data.frame(data)
+rownames(data_tmp) = data$ENSEMBL_ID
+data_tmp$ENSEMBL_ID = NULL
+data_tmp = data_tmp[, metadata$rnaseq_id] # order the expression table 
+identical(colnames(data_tmp), metadata$rnaseq_id) # must be TRUE 
+data_tmp[1:3,1:3]
+x <- DGEList(counts=as.matrix(data_tmp), samples=metadata)
+cpm = cpm(x)
+# cpm[1:3,1:3]
+
+keep.exp = rowSums(cpm > 1) >= 0.3*ncol(x) # Filter non-expressed genes
+x = x[keep.exp,]
+dim(x$counts)
+counts_filt = as.data.frame(x$counts) # counts filtered matrix 
+# counts_filt[1:3, 1:3]
+```
+
+# PCA before adjustment
+```{r pca, echo=TRUE}
+# Let's factor be factor! 
+metadata$sex = as.factor(metadata$sex)
+metadata$diagnosis = as.factor(metadata$diagnosis)
+metadata$aj_status = as.factor(metadata$aj_status)
+metadata$population_assignment = as.factor(metadata$population_assignment)
+
+# Data normalization 
+dds <- DESeqDataSetFromMatrix(countData = round(counts_filt),
+                             colData = metadata,
+                             design = ~ diagnosis)
+
+gExpr <- DGEList(counts=assay(dds))
+gExpr <- calcNormFactors(gExpr)
+vobjGenes <- voom(gExpr, model.matrix( ~ diagnosis, metadata) )
+gene_counts_voom = vobjGenes$E # normalized matrix 
+
+res.pca = prcomp(t(gene_counts_voom))
+fviz_pca_ind(res.pca, 
+             habillage = metadata$diagnosis)
+```
+
+# PCA after adjustment
+```{r adj}
+# SVA network for data adjustment 
+mod0 <- model.matrix(~ 1, colData(dds))
+mod <- model.matrix(design(dds), colData(dds))
+nsv <- num.sv(gene_counts_voom, mod, method = "be")
+message(paste0("Number of SVs proposed: ", nsv)) 
+resid_expr = sva_network(gene_counts_voom, nsv) # matrix adjusted
+resid_expr_t = t(resid_expr)
+
+res.pca2 = prcomp(resid_expr_t)
+fviz_pca_ind(res.pca2,
+             habillage = metadata$diagnosis)
+```
+
+# Power threshold
+```{r soft.threshold, echo=TRUE, fig.width=4, fig.height=5}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+
+# Call the network topology analysis function
+sft = pickSoftThreshold(resid_expr_t, powerVector = powers, verbose = 5)
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+cex1 = 0.9
+
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"))
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red")
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+```
+
+# Connectivity
+```{r connectivity, echo=TRUE, fig.width=4, fig.height=5}
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+# TOM adjacency
+```{r TOM.adjacency, echo=TRUE, fig.width=8, fig.height=6}
+softPower = 5
+adjacency = adjacency(resid_expr_t, power = softPower, type = "signed") 
+TOM = TOMsimilarity(adjacency, TOMType="signed")
+dissTOM = 1-TOM
+geneTree = flashClust(as.dist(dissTOM), method="average")
+
+plot(geneTree, xlab="", sub="", main= "Gene Clustering on TOM-based dissimilarity", labels= FALSE, hang=0.04)
+
+```
+
+# Net parameters
+```{r module.size, echo=TRUE, results='asis'}
+# "We like large modules" - Tutorial, so we set the minimum module size relatively high:
+minModuleSize = 30
+# Module identification using dynamic tree cut:
+dynamicMods = cutreeDynamic(dendro = geneTree, 
+                            distM = dissTOM,
+                            deepSplit = 4, 
+                            pamRespectsDendro = FALSE,
+                            minClusterSize = minModuleSize);
+
+clusters_size = data.matrix(table(dynamicMods))
+clusters_size = cbind(rownames(clusters_size),clusters_size)
+colnames(clusters_size) = c("cluster","size")
+
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+clusters_colors = data.matrix(table(dynamicColors))
+clusters_colors = cbind(rownames(clusters_colors), clusters_colors)
+colnames(clusters_colors) = c("color","size")
+
+mytable = table(dynamicColors)
+# as.data.frame(t(as.matrix(unclass(mytable))))
+```
+
+# Dendrogram colors
+```{r dendrogram_net.colors, echo=TRUE, fig.width=10, fig.height=6}
+# Plot the dendrogram and colors underneath
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+main = "Gene dendrogram and module colors")
+
+```
+
+# Number of modules before merge
+```{r num_modules, echo=TRUE, results='asis'}
+length(unique(dynamicColors))
+```
+
+# Clustering eigengenes 
+```{r clustering.eigengenes, echo=TRUE, fig.width=12, fig.height=8}
+# Calculate eigengenes
+MEList = moduleEigengenes(resid_expr_t, colors = dynamicColors)
+MEs = MEList$eigengenes
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs)
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average")
+
+plot(METree, main = "Clustering of module eigengenes",
+xlab = "", sub = "")
+#We choose a height cut of 0.25, corresponding to correlation of 0.75, to merge
+MEDissThres = 0.25
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+
+```
+
+# Merge modules 
+```{r merge.modules, echo=TRUE, fig.width=10, fig.height=6}
+# Call an automatic merging function
+merge = mergeCloseModules(resid_expr_t, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs
+#png(paste0(expr_dir, "/MyND/Merge_modules.png"), width = 16, height = 8, res = 300, units = "in")
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+c("Dynamic Tree Cut", "Merged dynamic"),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)
+```
+
+## Merged network
+```{r use.merged.network, echo=TRUE, fig.width=10, fig.height=8}
+#### For use of the new MERGED DATA!!! 
+# Rename to moduleColors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+# Save module colors and labels for use in subsequent parts
+save(MEs, mergedMEs, moduleColors, geneTree, adjacency, file = paste0(expr_dir, "MyND/WGCNA_monocytes.RData"))
+```
+
+# Number of modules after merge
+```{r num_modules_merg, echo=TRUE, results='asis'}
+length(unique(moduleColors))
+```
+
+# Trait associations
+```{r module_trait.associations_all, echo=TRUE, fig.width=8, fig.height=20 }
+metadata_selected2 = metadata[,c("diagnosis", "sex", "age")]
+metadata_selected2$diagnosis = as.numeric(metadata_selected2$diagnosis)
+metadata_selected2$sex = as.numeric(metadata_selected2$sex)
+metadata_selected2$age = as.numeric(metadata_selected2$age)
+nGenes = ncol(resid_expr_t)
+nSamples = nrow(resid_expr_t)
+
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(resid_expr_t, moduleColors)$eigengenes
+MEs = orderMEs(MEs0) #Reorder eigenvectors such that similar ones measured by correlation are next to each other
+moduleTraitCor = WGCNA::cor(MEs, metadata_selected2, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+signif(moduleTraitPvalue, 1), ")", sep = "")
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 20, 3, 3));
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+xLabels = names(metadata_selected2), 
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"))
+
+gene_ids = colnames(resid_expr_t)
+gene_ids = colnames(resid_expr_t)
+# save(moduleColors, file = paste0(work_plots, "MyND/moduleColors.Rdata"))
+gene_modules = cbind(gene_ids, moduleColors)
+gene_modules = as.data.frame(gene_modules)
+```
+
+# Module assignment 
+```{r symbol}
+## Get conversion table for Gencode 30
+gencode_30 = read.table(paste0(expr_dir, "ens.geneid.gencode.v30"))
+colnames(gencode_30) = c("ensembl","symbol")
+gene_modules_symbol = merge(gene_modules, gencode_30, by.x = "gene_ids", by.y = "ensembl")
+
+write.table(gene_modules_symbol, file = paste0(expr_dir, "MyND/geneBymodule.txt"), quote = F, row.names = F, sep = "\t")
+createDT(gene_modules_symbol)
+```
+
+# Module size 
+```{r mod_size}
+mytable2 = table(gene_modules_symbol$moduleColors)
+createDT(as.data.frame(t(as.matrix(unclass(mytable2)))))
+```
+

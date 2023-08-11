@@ -1,0 +1,211 @@
+---
+title: "WGCNA - RNASeq"
+output: html_document
+date: "2023-08-10"
+---
+
+
+
+```{r clean.variables, echo=FALSE}
+#This command clean all variables. BE CAREFULL!!! 
+rm(list = setdiff(ls(), lsf.str()))
+```
+
+```{r Helper Functions, echo = FALSE}
+createDT <- function(DF, caption="", scrollY=500){
+  data <- DT::datatable(DF, caption=caption,
+    extensions =  'Buttons',
+    options = list( dom = 'Bfrtip', 
+                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
+                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
+                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
+    )
+  ) 
+   return(data)
+}
+```
+
+
+```{r load.packages, echo=FALSE, message=FALSE, results='hide'}
+
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+
+# if(!require("limma")) BiocManager::install("limma"); library("limma")
+library(edgeR)
+if(!require("sva")) BiocManager::install("sva"); library("sva")
+if(!require("limma")) BiocManager::install("limma"); library("limma")
+library("factoextra")
+library(WGCNA)
+library("data.table")
+library(flashClust)
+library(DESeq2)
+library(tidyverse)
+```
+
+# Download dataset 
+```{r}
+# https://zenodo.org/record/4715907 
+expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+
+# Metadata 
+metadata = as.data.frame(data.table::fread(paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_metadata.tsv"), header = T, stringsAsFactors = F, check.names = F))
+rownames(metadata) = metadata$rna_id
+
+# Counts expression data 
+data = data.table::fread(paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_gene_counts.tsv"), header = T, stringsAsFactors = F, check.names = F)
+dim(data)
+data[1:5, 1:5]
+
+data_tmp = as.data.frame(data)
+data_tmp$gene_name = NULL
+rownames(data_tmp) = data$ensembl_id
+data_tmp$ensembl_id = NULL
+data_tmp = data_tmp[, metadata$rna_id] # order the expression table 
+identical(colnames(data_tmp), metadata$rna_id) # must be TRUE 
+data_tmp[1:3,1:3]
+x <- DGEList(counts=as.matrix(data_tmp), samples=metadata)
+cpm = cpm(x)
+cpm[1:3,1:3]
+
+keep.exp = rowSums(cpm > 1) >= 0.3*ncol(x) #Filtering
+x = x[keep.exp,]
+dim(x$counts)
+counts_filt = as.data.frame(x$counts)
+counts_filt[1:3, 1:3]
+hist(counts_filt$sample_269)
+
+# TPM data 
+tpm_expr = data.table::fread(paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_gene_tpm.tsv"), header = T, stringsAsFactors = F, check.names = F)
+
+tpm_filt = tpm_expr[tpm_expr$ensembl_id %in% rownames(counts_filt), ]
+tpm_filt = tpm_filt[! is.na(tpm_filt$gene_name), ]
+tpm_filt =as.data.frame(tpm_filt[! duplicated(tpm_filt$gene_name), ])
+rownames(tpm_filt) = tpm_filt$gene_name
+tpm_filt$ensembl_id = NULL
+tpm_filt$gene_name = NULL
+tpm_filt = tpm_filt[, metadata$rna_id]# order the expression table 
+identical(colnames(tpm_filt), metadata$rna_id) # must be TRUE 
+```
+
+# PCA before adjustment
+```{r pca, echo=TRUE}
+metadata$sex = as.factor(metadata$sex)
+metadata$disease = as.factor(metadata$disease)
+metadata$library_prep = as.factor(metadata$library_prep)
+metadata$site_id = as.factor(metadata$site_id)
+
+res.pca = prcomp(t(tpm_filt))
+fviz_pca_ind(res.pca, 
+             habillage = metadata$disease)
+```
+
+
+
+```{r pca}
+covariates = c("rin", "pct_mrna_bases", "median_3prime_bias", "median_5prime_bias", "pct_chimeras", "gPC1","gPC2","gPC3","gPC4", "gPC5", "pct_ribosomal_bases", "pct_intergenic_bases", "estimated_library_size" )
+
+residuals <- removeBatchEffect(x = tpm_filt, 
+                                   batch = metadata$site_id, 
+                                   batch2 = metadata$sex, 
+                                   design = model.matrix(~ disease, data = metadata), #force to not regress disease 
+                                   covariates = as.matrix(metadata[, covariates])) 
+
+dim(residuals)
+res.pca2 = prcomp(t(residuals))
+fviz_pca_ind(res.pca2,
+             habillage = metadata$disease) 
+
+```
+
+
+```{r , echo=TRUE, fig.width=5, fig.height=5}
+# metadata$sex = as.factor(metadata$sex)
+# metadata$disease = as.factor(metadata$disease)
+# metadata$library_prep = as.factor(metadata$library_prep)
+# metadata$site_id = as.factor(metadata$site_id)
+
+dds <- DESeqDataSetFromMatrix(countData = round(counts_filt),
+                             colData = metadata,
+                             design = ~ disease)
+
+#Using the function of voom normalization
+gExpr <- DGEList(counts=assay(dds))
+gExpr <- calcNormFactors(gExpr)
+vobjGenes <- voom(gExpr, model.matrix( ~ disease, metadata) )
+gene_counts_voom = vobjGenes$E
+mod0 <- model.matrix(~ 1, colData(dds))
+mod <- model.matrix(design(dds), colData(dds))
+nsv <- num.sv(gene_counts_voom, mod, method = "be")
+nsv
+
+# adjust for network
+#residuals = sva_network(gene_counts_voom, nsv) 
+residuals = sva_network(gene_counts_voom, nsv) 
+
+residuals_t = t(residuals)#datExpr is the new table of expression 
+
+dim(residuals)
+save(residuals, metadata, file = paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_gene4net.RData"))
+
+
+```
+
+# PCA after adjustment
+```{r pca_adj}
+res.pca2 = prcomp(t(residuals))
+fviz_pca_ind(res.pca2) 
+```
+
+
+
+#Clustering: Euclidean
+```{r cluster.samples, fig.width=15, fig.height=15}
+#Euclidean distance with the transposed matrix
+sampleTree = hclust(dist(t(residuals)), method = "average")
+
+plot(sampleTree, main = "Sample clustering to detecting outliers after correction", sub = "Function: hclust, Method: average from Euclidean distance", xlab = "samples", cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5, cex.sub = 1.5)
+```
+
+## Power threshold
+```{r soft.threshold, echo=TRUE, fig.width=4, fig.height=8}
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+
+# Call the network topology analysis function
+sft = pickSoftThreshold(t(residuals), powerVector = powers, verbose = 5)
+
+# Scale-free topology fit index as a function of the soft-thresholding power
+cex1 = 0.9
+
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"))
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red")
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+
+```
+
+## Connectivity
+```{r connectivity, echo=TRUE, fig.width=4, fig.height=5}
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+## TOM adjacency
+```{r TOM.adjacency, echo=TRUE, fig.width=8, fig.height=6}
+softPower = 5
+adjacency = adjacency(residuals, power = softPower, type = "signed") 
+TOM = TOMsimilarity(adjacency, TOMType="signed")
+dissTOM = 1-TOM
+geneTree = flashClust(as.dist(dissTOM), method="average")
+
+plot(geneTree, xlab="", sub="", main= "Gene Clustering on TOM-based dissimilarity", labels= FALSE, hang=0.04)
+
+```
+
