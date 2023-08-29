@@ -73,58 +73,24 @@ x = x[keep.exp,]
 dim(x$counts)
 counts_filt = as.data.frame(x$counts)
 counts_filt[1:3, 1:3]
-hist(counts_filt$sample_269)
 
-# TPM data 
-tpm_expr = data.table::fread(paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_gene_tpm.tsv"), header = T, stringsAsFactors = F, check.names = F)
-
-tpm_filt = tpm_expr[tpm_expr$ensembl_id %in% rownames(counts_filt), ]
-tpm_filt = tpm_filt[! is.na(tpm_filt$gene_name), ]
-tpm_filt =as.data.frame(tpm_filt[! duplicated(tpm_filt$gene_name), ])
-rownames(tpm_filt) = tpm_filt$gene_name
-tpm_filt$ensembl_id = NULL
-tpm_filt$gene_name = NULL
-tpm_filt = tpm_filt[, metadata$rna_id]# order the expression table 
-identical(colnames(tpm_filt), metadata$rna_id) # must be TRUE 
 ```
 
 # PCA before adjustment
+Counts matrix 
 ```{r pca, echo=TRUE}
 metadata$sex = as.factor(metadata$sex)
 metadata$disease = as.factor(metadata$disease)
 metadata$library_prep = as.factor(metadata$library_prep)
 metadata$site_id = as.factor(metadata$site_id)
 
-res.pca = prcomp(t(tpm_filt))
+res.pca = prcomp(t(counts_filt))
 fviz_pca_ind(res.pca, 
              habillage = metadata$disease)
 ```
 
-
-
-```{r pca}
-covariates = c("rin", "pct_mrna_bases", "median_3prime_bias", "median_5prime_bias", "pct_chimeras", "gPC1","gPC2","gPC3","gPC4", "gPC5", "pct_ribosomal_bases", "pct_intergenic_bases", "estimated_library_size" )
-
-residuals <- removeBatchEffect(x = tpm_filt, 
-                                   batch = metadata$site_id, 
-                                   batch2 = metadata$sex, 
-                                   design = model.matrix(~ disease, data = metadata), #force to not regress disease 
-                                   covariates = as.matrix(metadata[, covariates])) 
-
-dim(residuals)
-res.pca2 = prcomp(t(residuals))
-fviz_pca_ind(res.pca2,
-             habillage = metadata$disease) 
-
-```
-
-
-```{r , echo=TRUE, fig.width=5, fig.height=5}
-# metadata$sex = as.factor(metadata$sex)
-# metadata$disease = as.factor(metadata$disease)
-# metadata$library_prep = as.factor(metadata$library_prep)
-# metadata$site_id = as.factor(metadata$site_id)
-
+## Data normalization
+```{r norm, message=FALSE}
 dds <- DESeqDataSetFromMatrix(countData = round(counts_filt),
                              colData = metadata,
                              design = ~ disease)
@@ -133,33 +99,28 @@ dds <- DESeqDataSetFromMatrix(countData = round(counts_filt),
 gExpr <- DGEList(counts=assay(dds))
 gExpr <- calcNormFactors(gExpr)
 vobjGenes <- voom(gExpr, model.matrix( ~ disease, metadata) )
-gene_counts_voom = vobjGenes$E
-mod0 <- model.matrix(~ 1, colData(dds))
-mod <- model.matrix(design(dds), colData(dds))
-nsv <- num.sv(gene_counts_voom, mod, method = "be")
-nsv
-
-# adjust for network
-#residuals = sva_network(gene_counts_voom, nsv) 
-residuals = sva_network(gene_counts_voom, nsv) 
-
-residuals_t = t(residuals)#datExpr is the new table of expression 
-
-dim(residuals)
-save(residuals, metadata, file = paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_gene4net.RData"))
-
-
+gene_counts_voom = vobjGenes$E # ate aqui
 ```
 
 # PCA after adjustment
-```{r pca_adj}
+Matrix normalized and adjusted 
+```{r pca2}
+covariates = c("rin", "pct_mrna_bases", "median_3prime_bias", "median_5prime_bias", "pct_chimeras", "gPC1","gPC2","gPC3","gPC4", "gPC5", "pct_ribosomal_bases", "pct_intergenic_bases", "estimated_library_size" )
+
+residuals <- removeBatchEffect(x = gene_counts_voom, 
+                                   batch = metadata$site_id, 
+                                   batch2 = metadata$sex, 
+                                #   design = model.matrix(~ disease, data = metadata), #force to not regress disease 
+                                   covariates = as.matrix(metadata[, covariates])) 
+
+dim(residuals)
 res.pca2 = prcomp(t(residuals))
-fviz_pca_ind(res.pca2) 
+fviz_pca_ind(res.pca2, 
+             habillage = metadata$disease)
+
 ```
 
-
-
-#Clustering: Euclidean
+# Clustering: Euclidean
 ```{r cluster.samples, fig.width=15, fig.height=15}
 #Euclidean distance with the transposed matrix
 sampleTree = hclust(dist(t(residuals)), method = "average")
@@ -167,7 +128,7 @@ sampleTree = hclust(dist(t(residuals)), method = "average")
 plot(sampleTree, main = "Sample clustering to detecting outliers after correction", sub = "Function: hclust, Method: average from Euclidean distance", xlab = "samples", cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5, cex.sub = 1.5)
 ```
 
-## Power threshold
+# Power threshold
 ```{r soft.threshold, echo=TRUE, fig.width=4, fig.height=8}
 # Choose a set of soft-thresholding powers
 powers = c(c(1:10), seq(from = 12, to=20, by=2))
@@ -188,7 +149,7 @@ abline(h=0.90,col="red")
 
 ```
 
-## Connectivity
+# Connectivity
 ```{r connectivity, echo=TRUE, fig.width=4, fig.height=5}
 # Mean connectivity as a function of the soft-thresholding power
 plot(sft$fitIndices[,1], sft$fitIndices[,5],
@@ -197,10 +158,10 @@ main = paste("Mean connectivity"))
 text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
 ```
 
-## TOM adjacency
+# TOM adjacency
 ```{r TOM.adjacency, echo=TRUE, fig.width=8, fig.height=6}
-softPower = 5
-adjacency = adjacency(residuals, power = softPower, type = "signed") 
+softPower = 7
+adjacency = adjacency(t(residuals), power = softPower, type = "signed") 
 TOM = TOMsimilarity(adjacency, TOMType="signed")
 dissTOM = 1-TOM
 geneTree = flashClust(as.dist(dissTOM), method="average")
@@ -208,4 +169,159 @@ geneTree = flashClust(as.dist(dissTOM), method="average")
 plot(geneTree, xlab="", sub="", main= "Gene Clustering on TOM-based dissimilarity", labels= FALSE, hang=0.04)
 
 ```
+
+# Net parameters
+```{r module.size, echo=TRUE, results='asis'}
+# "We like large modules" - Tutorial, so we set the minimum module size relatively high:
+minModuleSize = 30
+# Module identification using dynamic tree cut:
+dynamicMods = cutreeDynamic(dendro = geneTree, 
+                            distM = dissTOM,
+                            deepSplit = 1, 
+                            pamRespectsDendro = FALSE,
+                            minClusterSize = minModuleSize);
+
+clusters_size = data.matrix(table(dynamicMods))
+clusters_size = cbind(rownames(clusters_size),clusters_size)
+colnames(clusters_size) = c("cluster","size")
+
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+clusters_colors = data.matrix(table(dynamicColors))
+clusters_colors = cbind(rownames(clusters_colors), clusters_colors)
+colnames(clusters_colors) = c("color","size")
+
+mytable = table(dynamicColors)
+# as.data.frame(t(as.matrix(unclass(mytable))))
+```
+
+# Dendrogram colors
+```{r dendrogram_net.colors, echo=TRUE, fig.width=10, fig.height=6}
+# Plot the dendrogram and colors underneath
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+main = "Gene dendrogram and module colors")
+
+```
+
+# Number of modules before merge
+```{r num_modules, echo=TRUE, results='asis'}
+length(unique(dynamicColors))
+```
+
+# Clustering eigengenes 
+```{r clustering.eigengenes, echo=TRUE, fig.width=12, fig.height=8}
+# Calculate eigengenes
+resid_expr_t = t(residuals)
+MEList = moduleEigengenes(resid_expr_t, colors = dynamicColors)
+MEs = MEList$eigengenes
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs)
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average")
+
+plot(METree, main = "Clustering of module eigengenes",
+xlab = "", sub = "")
+#We choose a height cut of 0.25, corresponding to correlation of 0.75, to merge
+MEDissThres = 0.25
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+
+```
+
+# Merge modules 
+```{r merge.modules, echo=TRUE, fig.width=10, fig.height=6}
+# Call an automatic merging function
+merge = mergeCloseModules(resid_expr_t, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs
+#png(paste0(expr_dir, "/MyND/Merge_modules.png"), width = 16, height = 8, res = 300, units = "in")
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+c("Dynamic Tree Cut", "Merged dynamic"),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)
+```
+
+## Merged network
+```{r use.merged.network, echo=TRUE, fig.width=10, fig.height=8}
+#### For use of the new MERGED DATA!!! 
+# Rename to moduleColors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+
+```
+
+# Number of modules after merge
+```{r num_modules_merg, echo=TRUE, results='asis'}
+length(unique(moduleColors))
+```
+
+# Trait associations
+```{r module_trait.associations_all, echo=TRUE, fig.width=8, fig.height=14 }
+metadata_selected2 = metadata[,c("sex", "site_id", "rin", "age_rounded", "disease_duration")]
+metadata_selected2$rin = as.numeric(metadata_selected2$rin)
+metadata_selected2$site_id = as.numeric(metadata_selected2$site_id)
+metadata_selected2$sex = as.numeric(metadata_selected2$sex)
+metadata_selected2$age_rounded = as.numeric(metadata_selected2$age_rounded)
+
+nGenes = ncol(resid_expr_t)
+nSamples = nrow(resid_expr_t)
+
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(resid_expr_t, moduleColors)$eigengenes
+MEs = orderMEs(MEs0) #Reorder eigenvectors such that similar ones measured by correlation are next to each other
+moduleTraitCor = WGCNA::cor(MEs, metadata_selected2, use = "p")
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples)
+
+# Will display correlations and their p-values
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",
+signif(moduleTraitPvalue, 1), ")", sep = "")
+dim(textMatrix) = dim(moduleTraitCor)
+par(mar = c(6, 20, 3, 3));
+# Display the correlation values within a heatmap plot
+labeledHeatmap(Matrix = moduleTraitCor,
+xLabels = names(metadata_selected2), 
+yLabels = names(MEs),
+ySymbols = names(MEs),
+colorLabels = FALSE,
+colors = greenWhiteRed(50),
+textMatrix = textMatrix,
+setStdMargins = FALSE,
+cex.text = 0.5,
+zlim = c(-1,1),
+main = paste("Module-trait relationships"))
+
+gene_ids = colnames(resid_expr_t)
+gene_ids = colnames(resid_expr_t)
+# save(moduleColors, file = paste0(work_plots, "MyND/moduleColors.Rdata"))
+gene_modules = cbind(gene_ids, moduleColors)
+gene_modules = as.data.frame(gene_modules)
+```
+
+# Gene assignment 
+```{r symbol}
+## Get conversion table for Gencode 30
+gencode_30 = read.table(paste0(expr_dir, "ens.geneid.gencode.v30"))
+colnames(gencode_30) = c("ensembl","symbol")
+gencode_30$ensembl = gsub("(.*)\\.(.*)","\\1",gencode_30$ensembl)
+gene_modules_symbol = merge(gene_modules, gencode_30, by.x = "gene_ids", by.y = "ensembl")
+
+# write.table(gene_modules_symbol, file = paste0(expr_dir, "MyND/geneBymodule.txt"), quote = F, row.names = F, sep = "\t")
+createDT( gene_modules_symbol)
+```
+
+# Module size 
+```{r mod_size}
+mytable2 = table(gene_modules_symbol$moduleColors)
+createDT(as.data.frame(t(as.matrix(unclass(mytable2)))))
+```
+
+And now what? 
+
 
