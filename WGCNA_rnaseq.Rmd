@@ -11,7 +11,7 @@ date: "2023-08-10"
 rm(list = setdiff(ls(), lsf.str()))
 ```
 
-```{r Helper Functions, echo = FALSE}
+```{r Helper Functions}
 createDT <- function(DF, caption="", scrollY=500){
   data <- DT::datatable(DF, caption=caption,
     extensions =  'Buttons',
@@ -26,21 +26,21 @@ createDT <- function(DF, caption="", scrollY=500){
 ```
 
 
-```{r load.packages, echo=FALSE, message=FALSE, results='hide'}
+```{r load.packages, message=FALSE, results='hide'}
 
 # if (!requireNamespace("BiocManager", quietly = TRUE))
 #     install.packages("BiocManager")
 
 # if(!require("limma")) BiocManager::install("limma"); library("limma")
-library(edgeR)
+library("edgeR")
 if(!require("sva")) BiocManager::install("sva"); library("sva")
 if(!require("limma")) BiocManager::install("limma"); library("limma")
 library("factoextra")
-library(WGCNA)
+library("WGCNA")
 library("data.table")
-library(flashClust)
-library(DESeq2)
-library(tidyverse)
+library("flashClust")
+library("DESeq2")
+library("tidyverse")
 ```
 
 # Download dataset 
