@@ -20,7 +20,7 @@ Paper: [Navarro et al, 2021](https://www.nature.com/articles/s43587-021-00110-x)
 rm(list = setdiff(ls(), lsf.str()))
 ```
 
-```{r Helper Functions, echo = FALSE}
+```{r Helper Functions}
 createDT <- function(DF, caption="", scrollY=500){
   data <- DT::datatable(DF, caption=caption,
     extensions =  'Buttons',
@@ -34,7 +34,7 @@ createDT <- function(DF, caption="", scrollY=500){
 }
 ```
 
-```{r load.packages, echo=FALSE, message=FALSE, results='hide'}
+```{r load.packages, message=FALSE, results='hide'}
 # if (!requireNamespace("BiocManager", quietly = TRUE))
 #     install.packages("BiocManager")
 
@@ -165,7 +165,7 @@ minModuleSize = 30
 # Module identification using dynamic tree cut:
 dynamicMods = cutreeDynamic(dendro = geneTree, 
                             distM = dissTOM,
-                            deepSplit = 4, 
+                            deepSplit = 3, 
                             pamRespectsDendro = FALSE,
                             minClusterSize = minModuleSize);
 
