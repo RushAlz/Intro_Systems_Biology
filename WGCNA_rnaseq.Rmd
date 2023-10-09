@@ -1,30 +1,20 @@
 ---
 title: "WGCNA - RNASeq"
+author:  |
+ | Katia Lopes
+ | Systems Analyst and Computational Biologist
 output: html_document
 date: "2023-08-10"
 ---
 
+Peter Langfelder and Steve Horvath tutorials [are here](https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/Tutorials/)
 
+Paper: [Humphrey et al, 2022](https://www.nature.com/articles/s41593-022-01205-3)
 
 ```{r clean.variables, echo=FALSE}
 #This command clean all variables. BE CAREFULL!!! 
 rm(list = setdiff(ls(), lsf.str()))
 ```
-
-```{r Helper Functions}
-createDT <- function(DF, caption="", scrollY=500){
-  data <- DT::datatable(DF, caption=caption,
-    extensions =  'Buttons',
-    options = list( dom = 'Bfrtip', 
-                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
-                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
-                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
-    )
-  ) 
-   return(data)
-}
-```
-
 
 ```{r load.packages, message=FALSE, results='hide'}
 
@@ -33,6 +23,7 @@ createDT <- function(DF, caption="", scrollY=500){
 
 # if(!require("limma")) BiocManager::install("limma"); library("limma")
 library("edgeR")
+library("DT")
 if(!require("sva")) BiocManager::install("sva"); library("sva")
 if(!require("limma")) BiocManager::install("limma"); library("limma")
 library("factoextra")
@@ -44,10 +35,13 @@ library("tidyverse")
 ```
 
 # Download dataset 
-```{r}
-# https://zenodo.org/record/4715907 
-expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+https://zenodo.org/record/6385747 
 
+```{r, echo=FALSE}
+expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+```
+
+```{r input}
 # Metadata 
 metadata = as.data.frame(data.table::fread(paste0(expr_dir, "Thoracic_Spinal_Cord/Thoracic_Spinal_Cord_metadata.tsv"), header = T, stringsAsFactors = F, check.names = F))
 rownames(metadata) = metadata$rna_id
@@ -313,15 +307,19 @@ gencode_30$ensembl = gsub("(.*)\\.(.*)","\\1",gencode_30$ensembl)
 gene_modules_symbol = merge(gene_modules, gencode_30, by.x = "gene_ids", by.y = "ensembl")
 
 # write.table(gene_modules_symbol, file = paste0(expr_dir, "MyND/geneBymodule.txt"), quote = F, row.names = F, sep = "\t")
-createDT( gene_modules_symbol)
+datatable(gene_modules_symbol)
 ```
 
 # Module size 
 ```{r mod_size}
 mytable2 = table(gene_modules_symbol$moduleColors)
-createDT(as.data.frame(t(as.matrix(unclass(mytable2)))))
+datatable(as.data.frame(t(as.matrix(unclass(mytable2)))))
 ```
 
 And now what? 
 
+# Session info
+```{r}
+sessionInfo()
+```
 

@@ -20,26 +20,13 @@ Paper: [Navarro et al, 2021](https://www.nature.com/articles/s43587-021-00110-x)
 rm(list = setdiff(ls(), lsf.str()))
 ```
 
-```{r Helper Functions}
-createDT <- function(DF, caption="", scrollY=500){
-  data <- DT::datatable(DF, caption=caption,
-    extensions =  'Buttons',
-    options = list( dom = 'Bfrtip', 
-                    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'), 
-                    scrollY = scrollY, scrollX=T, scrollCollapse = T, paging = F,  
-                      columnDefs = list(list(className = 'dt-center', targets = "_all"))
-    )
-  ) 
-   return(data)
-}
-```
-
 ```{r load.packages, message=FALSE, results='hide'}
 # if (!requireNamespace("BiocManager", quietly = TRUE))
 #     install.packages("BiocManager")
 
 # if(!require("limma")) BiocManager::install("limma"); library("limma")
 library(edgeR)
+library(DT)
 library(sva)
 library(limma)
 library(factoextra)
@@ -51,10 +38,13 @@ library(tidyverse)
 ```
 
 # Download dataset 
-```{r input}
-# https://zenodo.org/record/4715907
-expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+https://zenodo.org/record/4715907
 
+```{r, echo=FALSE}
+expr_dir = "/pastel/Github_scripts/Intro_Systems_Biology/datasets/"
+```
+
+```{r input}
 # Metadata 
 metadata = as.data.frame(data.table::fread(paste0(expr_dir, "MyND/MyND_metadata.txt"), header = T, stringsAsFactors = F, check.names = F))
 
@@ -297,13 +287,18 @@ gencode_30 = read.table(paste0(expr_dir, "ens.geneid.gencode.v30"))
 colnames(gencode_30) = c("ensembl","symbol")
 gene_modules_symbol = merge(gene_modules, gencode_30, by.x = "gene_ids", by.y = "ensembl")
 
-write.table(gene_modules_symbol, file = paste0(expr_dir, "MyND/geneBymodule.txt"), quote = F, row.names = F, sep = "\t")
-createDT(gene_modules_symbol)
+# write.table(gene_modules_symbol, file = paste0(expr_dir, "MyND/geneBymodule.txt"), quote = F, row.names = F, sep = "\t")
+datatable(gene_modules_symbol)
 ```
 
 # Module size 
 ```{r mod_size}
 mytable2 = table(gene_modules_symbol$moduleColors)
-createDT(as.data.frame(t(as.matrix(unclass(mytable2)))))
+datatable(as.data.frame(t(as.matrix(unclass(mytable2)))))
+```
+
+# Session info
+```{r}
+sessionInfo()
 ```
 
