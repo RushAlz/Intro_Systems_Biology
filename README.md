@@ -20,10 +20,6 @@ Hands-on tutorials:
 
 - WGCNA tutorials: https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/
 
-This work is licensed under a
-[Attribution-NonCommercial 4.0 International][by-nc]
-
-[by-nc]: https://creativecommons.org/licenses/by-nc/4.0/
 
 > by Katia Lopes. 
 
