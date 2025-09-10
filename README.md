@@ -18,7 +18,7 @@ Hands-on tutorials:
 
 - WGCNA for bulk RNASeq data: [Thoracic spinal cord](https://rushalz.github.io/Intro_Systems_Biology/WGCNA_rnaseq.html). Humphrey et al. Nat Neuroscience, 2022.
 
-- WGCNA tutorials: https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/
+- WGCNA paper: [Peter Langfelder & Steve Horvath, 2008](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-9-559).
 
 
 > by Katia Lopes. 

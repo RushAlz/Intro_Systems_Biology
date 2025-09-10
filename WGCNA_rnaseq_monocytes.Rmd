@@ -50,8 +50,8 @@ metadata = as.data.frame(data.table::fread(paste0(expr_dir, "MyND/MyND_metadata.
 
 # Counts expression data 
 data = data.table::fread(paste0(expr_dir, "MyND/monocyte_counts_matrix.txt"), header = T, stringsAsFactors = F, check.names = F)
-# dim(data)
-# data[1:5, 1:5]
+dim(data)
+data[1:5, 1:5]
 data_tmp = as.data.frame(data)
 rownames(data_tmp) = data$ENSEMBL_ID
 data_tmp$ENSEMBL_ID = NULL
@@ -232,7 +232,7 @@ colorOrder = c("grey", standardColors(50));
 moduleLabels = match(moduleColors, colorOrder)-1;
 MEs = mergedMEs;
 # Save module colors and labels for use in subsequent parts
-save(MEs, mergedMEs, moduleColors, geneTree, adjacency, file = paste0(expr_dir, "MyND/WGCNA_monocytes.RData"))
+# save(MEs, mergedMEs, moduleColors, geneTree, adjacency, file = paste0(expr_dir, "MyND/WGCNA_monocytes.RData"))
 ```
 
 # Number of modules after merge
